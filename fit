@@ -1,0 +1,280 @@
+#!/bin/bash
+
+# Script Name: fit
+
+#Define color codes using an associative array
+declare -A colors
+colors[red]='\033[0;31m'
+colors[green]='\033[0;32m'
+colors[yellow]='\033[1;33m'
+colors[blue]='\033[0;34m'
+colors[magenta]='\033[0;35m'
+colors[cyan]='\033[0;36m'
+colors[none]='\033[0m' # No Color
+
+cd_fit_root() {
+	local current_dir=$(pwd)
+	while [ ! -d ".fit" ]; do
+		cd ..
+		if [ "$(pwd)" == "$HOME" ]; then
+			echo "Error: No .fit directory found in the current path or any of its parent directories."
+			exit 1
+		fi
+	done
+}
+
+# Function to apply color to strings and return the formatted string
+colorize() {
+	local color=$1
+	local text=$2
+	# Check if the specified color exists, default to 'none' if it doesn't
+	[[ -z ${colors[$color]} ]] && color='none'
+	echo -n "${colors[$color]}${text}${colors[none]}"
+}
+
+# Function to handle cloning the repository
+fit_clone() {
+	if [ $# -ne 2 ]; then
+		echo "Error: Incorrect number of arguments."
+		echo "Usage: fit clone [repository] [workingFolderName]"
+		exit 1
+	fi
+
+	local repository=$1
+	local working_folder_name=$2
+
+	# Create the main working folder and .fit subfolders
+	mkdir -p "$working_folder_name/.fit/worktrees"
+	echo "Created working folder and .fit directory: $working_folder_name"
+
+	# Clone the repository into the .fit folder
+	git clone "$repository" "$working_folder_name/.fit/repo"
+	echo "Repository cloned into $working_folder_name/.fit/repo"
+
+	# Copy the repository files to the working folder (excluding the .git directory)
+	rsync -av --exclude='.git' "$working_folder_name/.fit/repo/" "$working_folder_name/"
+	echo "Repository files copied to the working folder."
+}
+
+# Function to create a worktree for a branch
+fit_branch() {
+	cd_fit_root
+	if [ $# -lt 1 ]; then
+		echo "Error: Incorrect number of arguments."
+		echo "Usage: fit create [branchName] [--push]"
+		exit 1
+	fi
+
+	local branch_name=$1
+	local repo_path="$(pwd)/.fit/repo"
+	local worktrees_path="$(pwd)/.fit/worktrees"
+
+	# Check if the branch already exists
+	if git -C "$repo_path" branch --list | grep -q "$branch_name"; then
+		echo "Branch '$branch_name' already exists."
+		## Check if the branch is checked out
+		if [ -d "$worktrees_path/$branch_name" ]; then
+			echo "Branch '$branch_name' is already checked out."
+			exit 0
+		fi
+
+		if git -C "$repo_path" merge "$branch_name" --no-ff --no-edit; then
+			echo "Changes from '$branch_name' successfully merged into main."
+		else
+			echo "Merge conflict occurred. Attempting automatic conflict resolution..."
+			if git -C "$repo_path" merge --abort; then
+				echo -e $(colorize 'red' "Merge aborted. Please resolve conflicts manually.")
+				return 1  # Exit the function with an error status
+			fi
+		fi
+	else
+		# Create the branch without checking it out
+		git -C "$repo_path" branch "$branch_name"
+		echo "Branch '$branch_name' created locally."
+	fi
+
+	# Create worktree for the branch
+	local worktree_path="$worktrees_path/$branch_name"
+	mkdir -p "$worktree_path"  # Ensure the directory exists
+	git -C "$repo_path" worktree add "$worktree_path" "$branch_name"
+	echo "Worktree for branch '$branch_name' created at $worktree_path"
+}
+
+# Function to list all worktrees
+fit_list() {
+	cd_fit_root
+	local worktrees_path="$(pwd)/.fit/worktrees"
+
+	echo -e $(colorize 'yellow' 'Worktrees:')
+	for worktree in "$worktrees_path"/*; do
+		if [ -d "$worktree" ]; then
+			echo -e "$(colorize 'cyan' "\t$(basename $worktree)")"
+		fi
+	done
+}
+
+# Function to show the status of the working directory and worktrees
+fit_status() {
+	cd_fit_root
+	local repo_path="$(pwd)/.fit/repo"
+	local working_dir_path="$(pwd)"
+	local worktrees_path="$(pwd)/.fit/worktrees"
+
+	# Collect all staged changes in worktrees to filter them out from the main status
+	declare -A staged_changes
+	for worktree in "$worktrees_path"/*; do
+		if [ -d "$worktree" ]; then
+			while IFS= read -r line; do
+				file=$(echo "$line" | awk '{print $2}')
+				staged_changes["$file"]=1
+			done < <(git -C "$worktree" status --porcelain | grep '^M ')
+		fi
+	done
+
+	# Show the status of the working directory
+	echo -e $(colorize 'yellow' 'Changes:')
+	while IFS= read -r line; do
+		file=$(echo "$line" | cut -d ' ' -f 2-)
+		if [[ ! ${staged_changes["$file"]} ]]; then
+			echo -e "$(colorize 'red' "\tmodified:   $file")"
+		else
+			echo -e "$(colorize 'green' "\tstaged:   $file")"
+		fi
+
+	done < <(rsync -rnic "$working_dir_path/" "$repo_path/" --exclude='.fit' | grep '^>' | cut -d ' ' -f 2-)
+	echo
+
+	echo -e $(colorize 'yellow' 'Git status for each worktree:')
+	# Loop through each worktree and get the git status
+	for worktree in "$worktrees_path"/*; do
+		if [ -d "$worktree" ]; then
+			git -C "$worktree" status
+			echo ""
+		fi
+	done
+}
+
+# Function to add file differences to a specific branch's worktree
+fit_add() {
+	cd_fit_root
+	if [ $# -ne 2 ]; then
+		echo -e $(colorize 'red' 'Error: Incorrect number of arguments.')
+		echo "Usage: fit add [branch] [fileglob]"
+		exit 1
+	fi
+
+	local branch_name=$1
+	local file_glob=$2
+	local worktree_path="$(pwd)/.fit/worktrees/$branch_name"
+	local repo_path="$(pwd)/.fit/repo"
+
+	if [ ! -d "$worktree_path" ]; then
+		echo -e $(colorize 'red' "Error: No worktree found for branch '$branch_name'.")
+		exit 1
+	fi
+
+	# Create a temporary directory for holding actual differences
+	local temp_diff_dir=$(mktemp -d)
+	local diff_file="$temp_diff_dir/diff.patch"
+
+	echo $file_glob
+
+	# Generate diff between the working directory and the repository
+	# and then check if differences affect the files specified by file_glob
+	(git diff "$repo_path/$file_glob" "$file_glob") > "$diff_file"
+
+	echo $file_glob
+
+	# Adjust paths in the diff file to be applicable in the target worktree
+	sed -i "s|a$repo_path/|a/|g; s|b/.fit/worktrees/$branch_name/|b/|g" "$diff_file"
+
+	if [ -s "$diff_file" ]; then
+		cat "$diff_file"
+		# Apply the patch in the worktree if there are any changes
+		if git -C "$worktree_path" apply -3 --ignore-space-change --ignore-whitespace "$diff_file"; then
+			git -C "$worktree_path" add "$file_glob"
+			echo "Changes applied and files added to branch '$branch_name' in the worktree."
+		else
+			echo -e $(colorize 'red' "Error: Patch failed to apply. Check for conflicts or issues in the diff.")
+		fi
+	else
+		echo "No changes to apply for '$file_glob'."
+	fi
+
+	# Clean up the temporary directory
+	rm -rf "$temp_diff_dir"
+}
+
+# Function to commit changes and automatically merge them into the main repository
+fit_commit() {
+	cd_fit_root
+	if [ $# -ne 2 ]; then
+		echo -e $(colorize 'red' "Error: Incorrect number of arguments.")
+		echo "Usage: fit commit [branch] \"[message]\""
+		exit 1
+	fi
+
+	local branch_name=$1
+	local commit_message=$2
+	local worktree_path="$(pwd)/.fit/worktrees/$branch_name"
+	local repo_path="$(pwd)/.fit/repo"
+
+	if [ ! -d "$worktree_path" ]; then
+		echo -e $(colorize 'red' "Error: No worktree found for branch '$branch_name'.")
+		exit 1
+	fi
+
+	# Committing changes in the worktree
+	if git -C "$worktree_path" diff --staged --quiet; then
+		echo "No changes to commit in branch '$branch_name'."
+		return 1  # Exit the function with an error status if no changes
+	else
+		git -C "$worktree_path" commit -m "$commit_message"
+		echo "Changes committed to branch '$branch_name' with message: $commit_message"
+	fi
+
+	# Now handle merging automatically
+	echo "Attempting to merge changes from '$branch_name' into main branch..."
+	# # Fetch latest changes and checkout the main branch
+	# git -C "$repo_path" fetch
+	# git -C "$repo_path" checkout main  # Ensure you're on the correct branch to merge into
+	# Merge changes from the branch
+	if git -C "$repo_path" merge "$branch_name" --no-ff --no-edit; then
+		echo "Changes from '$branch_name' successfully merged into main."
+	else
+		echo "Merge conflict occurred. Attempting automatic conflict resolution..."
+		if git -C "$repo_path" merge --abort; then
+			echo -e $(colorize 'red' "Merge aborted. Please resolve conflicts manually.")
+			return 1  # Exit the function with an error status
+		fi
+	fi
+}
+
+
+
+# Main logic for script
+case $1 in
+	clone)
+		fit_clone $2 $3
+		;;
+	branch)
+		fit_branch $2
+		;;
+	list)
+		fit_list
+		;;
+	status)
+		fit_status
+		;;
+	add)
+		fit_add $2 $3
+		;;
+	commit)
+		fit_commit $2 "$3"
+		;;
+	*)
+		echo "Error: Unknown command '$1'."
+		echo "Usage: fit {clone|branch|status|add|commit}"
+		exit 1
+		;;
+esac
