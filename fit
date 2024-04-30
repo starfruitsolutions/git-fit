@@ -2,6 +2,10 @@
 
 # Script Name: fit
 
+# paths
+repo_path=".fit/repo"
+worktrees_path=".fit/worktrees"
+
 #Define color codes using an associative array
 declare -A colors
 colors[red]='\033[0;31m'
@@ -12,6 +16,7 @@ colors[magenta]='\033[0;35m'
 colors[cyan]='\033[0;36m'
 colors[none]='\033[0m' # No Color
 
+# Function to change directory to the root of the working directory
 cd_fit_root() {
 	local current_dir=$(pwd)
 	while [ ! -d ".fit" ]; do
@@ -30,6 +35,62 @@ colorize() {
 	# Check if the specified color exists, default to 'none' if it doesn't
 	[[ -z ${colors[$color]} ]] && color='none'
 	echo -n "${colors[$color]}${text}${colors[none]}"
+}
+
+#function to merge worktree changes into the main branch
+fit_merge() {
+	cd_fit_root
+
+	# checkout the main branch
+	git -C "$repo_path" checkout main  # Ensure you're on the correct branch to merge into
+
+	# Loop through each worktree and get the git status
+	for worktree in "$worktrees_path"/*; do
+		if [ -d "$worktree" ]; then
+			branch_name=$(basename "$worktree")
+			# Merge changes from the branch
+			if git -C "$repo_path" merge "$branch_name" --no-ff --no-edit; then
+				echo "Changes from '$branch_name' successfully merged into main."
+			else
+				echo "Merge conflict occurred. Attempting automatic conflict resolution..."
+				if git -C "$repo_path" merge --abort; then
+					echo -e $(colorize 'red' "Merge aborted. Please resolve conflicts manually.")
+					return 1  # Exit the function with an error status
+				fi
+			fi
+		fi
+	done
+}
+
+# Function to initialize a new Git repository in .fit/repo and copy current directory's content
+fit_init() {
+	if [ $# -eq 1 ]; then
+		mkdir -p $1
+		cd $1
+	fi
+
+	# Check if the repo directory is empty
+	if [ -d ".fit" ]; then
+		echo "This is already a fit repository. Exiting..."
+		return 1  # Exit if the repository directory is not empty
+	fi
+
+	# Create the .fit and repo directories if they do not exist
+	mkdir -p "$repo_path"
+	# create the worktrees directory
+	mkdir -p "$worktrees_path"
+
+	# Copy the current directory content into .fit/repo, excluding the .fit directory itself
+	rsync -av --exclude='.fit' "." "$repo_path/"
+
+	# Initialize Git repository in .fit/repo
+	git -C "$repo_path" init
+	echo "Initialized new Git repository in $repo_path."
+
+	# commit if there's something to commit
+	git -C "$repo_path" add .
+	git -C "$repo_path" commit -m "Initial commit"
+	echo "Initial commit made in $repo_path."
 }
 
 # Function to handle cloning the repository
@@ -66,8 +127,6 @@ fit_branch() {
 	fi
 
 	local branch_name=$1
-	local repo_path="$(pwd)/.fit/repo"
-	local worktrees_path="$(pwd)/.fit/worktrees"
 
 	# Check if the branch already exists
 	if git -C "$repo_path" branch --list | grep -q "$branch_name"; then
@@ -103,7 +162,6 @@ fit_branch() {
 # Function to list all worktrees
 fit_list() {
 	cd_fit_root
-	local worktrees_path="$(pwd)/.fit/worktrees"
 
 	echo -e $(colorize 'yellow' 'Worktrees:')
 	for worktree in "$worktrees_path"/*; do
@@ -116,9 +174,7 @@ fit_list() {
 # Function to show the status of the working directory and worktrees
 fit_status() {
 	cd_fit_root
-	local repo_path="$(pwd)/.fit/repo"
 	local working_dir_path="$(pwd)"
-	local worktrees_path="$(pwd)/.fit/worktrees"
 
 	# Collect all staged changes in worktrees to filter them out from the main status
 	declare -A staged_changes
@@ -165,8 +221,7 @@ fit_add() {
 
 	local branch_name=$1
 	local file_glob=$2
-	local worktree_path="$(pwd)/.fit/worktrees/$branch_name"
-	local repo_path="$(pwd)/.fit/repo"
+	local worktree_path="$worktrees_path/$branch_name"
 
 	if [ ! -d "$worktree_path" ]; then
 		echo -e $(colorize 'red' "Error: No worktree found for branch '$branch_name'.")
@@ -216,8 +271,7 @@ fit_commit() {
 
 	local branch_name=$1
 	local commit_message=$2
-	local worktree_path="$(pwd)/.fit/worktrees/$branch_name"
-	local repo_path="$(pwd)/.fit/repo"
+	local worktree_path="$worktrees_path/$branch_name"
 
 	if [ ! -d "$worktree_path" ]; then
 		echo -e $(colorize 'red' "Error: No worktree found for branch '$branch_name'.")
@@ -254,6 +308,9 @@ fit_commit() {
 
 # Main logic for script
 case $1 in
+	init)
+		fit_init $2
+		;;
 	clone)
 		fit_clone $2 $3
 		;;
