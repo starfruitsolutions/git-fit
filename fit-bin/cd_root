@@ -1,0 +1,12 @@
+#!/bin/bash
+
+cd_root() {
+	while [ ! -d ".fit" ]; do
+		cd ..
+		if [ "$(pwd)" == "$HOME" ]; then
+			echo "Error: Not a fit repository."
+			exit 1
+		fi
+	done
+}
+export -f cd_root

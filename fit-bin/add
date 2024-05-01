@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# Function to add file differences to a specific branch's worktree
+add() {
+	cd_root
+	if [ $# -ne 2 ]; then
+		echo -e $(colorize 'red' 'Error: Incorrect number of arguments.')
+		echo "Usage: fit add [branch] [fileglob]"
+		exit 1
+	fi
+
+	local branch_name=$1
+	local file_glob=$2
+	local worktree_path="$worktrees_path/$branch_name"
+
+	if [ ! -d "$worktree_path" ]; then
+		echo -e $(colorize 'red' "Error: No worktree found for branch '$branch_name'.")
+		exit 1
+	fi
+
+	# Create a temporary directory for holding actual differences
+	local temp_diff_dir=$(mktemp -d)
+	local diff_file="$temp_diff_dir/diff.patch"
+
+	# Generate diff between the working directory and the repository
+	# and then check if differences affect the files specified by file_glob
+	(git diff "$repo_path/$file_glob" "$file_glob") > "$diff_file"
+
+
+
+	if [ -s "$diff_file" ]; then
+		# Adjust paths in the diff file to be applicable in the target worktree
+		sed -i "s|a/$repo_path/|a/|g; s|b/.fit/repo/|b/|g" "$diff_file"
+		cat "$diff_file"
+
+		# Apply the patch in the worktree if there are any changes
+		if git -C "$worktree_path" apply -3 --ignore-space-change --ignore-whitespace "$diff_file"; then
+			git -C "$worktree_path" add "$file_glob"
+			echo "Changes applied and files added to branch '$branch_name' in the worktree."
+		else
+			echo -e $(colorize 'red' "Error: Patch failed to apply. Check for conflicts or issues in the diff.")
+		fi
+	else
+		echo "No changes to apply for '$file_glob'."
+	fi
+
+	# Clean up the temporary directory
+	rm -rf "$temp_diff_dir"
+}
+
+export -f add

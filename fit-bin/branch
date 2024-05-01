@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Function to create a worktree for a branch
+branch() {
+	cd_root
+	if [ $# -lt 1 ]; then
+		echo "Error: Incorrect number of arguments."
+		echo "Usage: fit create [branchName] [--push]"
+		exit 1
+	fi
+
+	local branch_name=$1
+
+	# Check if the branch already exists
+	if git -C "$repo_path" branch --list | grep -q "$branch_name"; then
+		echo "Branch '$branch_name' already exists."
+		## Check if the branch is checked out
+		if [ -d "$worktrees_path/$branch_name" ]; then
+			echo "Branch '$branch_name' is already checked out."
+			exit 0
+		fi
+
+		if git -C "$repo_path" merge "$branch_name" --no-ff --no-edit; then
+			echo "Changes from '$branch_name' successfully merged into main."
+		else
+			echo "Merge conflict occurred. Attempting automatic conflict resolution..."
+			if git -C "$repo_path" merge --abort; then
+				echo -e $(colorize 'red' "Merge aborted. Please resolve conflicts manually.")
+				return 1  # Exit the function with an error status
+			fi
+		fi
+	else
+		# Create the branch without checking it out
+		git -C "$repo_path" branch "$branch_name"
+		echo "Branch '$branch_name' created locally."
+	fi
+
+	# Create worktree for the branch
+	local worktree_path="../worktrees/$branch_name"
+	mkdir -p "$worktree_path"  # Ensure the directory exists
+	git -C "$repo_path" worktree add "$worktree_path" "$branch_name"
+	echo "Worktree for branch '$branch_name' created at $worktree_path"
+}
+
+export -f branch

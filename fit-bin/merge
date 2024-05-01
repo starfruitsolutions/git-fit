@@ -1,0 +1,28 @@
+#!/bin/bash
+
+#function to merge worktree changes into the main branch
+merge() {
+	cd_root
+
+	# checkout the main branch
+	git -C "$repo_path" checkout main  # Ensure you're on the correct branch to merge into
+
+	# Loop through each worktree and get the git status
+	for worktree in "$worktrees_path"/*; do
+		if [ -d "$worktree" ]; then
+			branch_name=$(basename "$worktree")
+			# Merge changes from the branch
+			if git -C "$repo_path" merge "$branch_name" --no-ff --no-edit; then
+				echo "Changes from '$branch_name' successfully merged into main."
+			else
+				echo "Merge conflict occurred. Attempting automatic conflict resolution..."
+				if git -C "$repo_path" merge --abort; then
+					echo -e $(colorize 'red' "Merge aborted. Please resolve conflicts manually.")
+					return 1  # Exit the function with an error status
+				fi
+			fi
+		fi
+	done
+}
+
+export -f merge

@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Function to show the status of the working directory and worktrees
+status() {
+	cd_root
+	local working_dir_path="$(pwd)"
+
+	# Collect all staged changes in worktrees to filter them out from the main status
+	declare -A staged_changes
+	for worktree in "$worktrees_path"/*; do
+		if [ -d "$worktree" ]; then
+			while IFS= read -r line; do
+				file=$(echo "$line" | awk '{print $2}')
+				staged_changes["$file"]=1
+			done < <(git -C "$worktree" status --porcelain | grep '^M ')
+		fi
+	done
+
+	# Show the status of the working directory
+	echo -e $(colorize 'yellow' 'Changes:')
+	while IFS= read -r line; do
+		file=$(echo "$line" | cut -d ' ' -f 2-)
+		if [[ ! ${staged_changes["$file"]} ]]; then
+			echo -e "$(colorize 'red' "\tmodified:   $file")"
+		else
+			echo -e "$(colorize 'green' "\tstaged:   $file")"
+		fi
+
+	done < <(rsync -rnic "$working_dir_path/" "$repo_path/" --exclude='.fit' | grep '^>' | cut -d ' ' -f 2-)
+	echo
+
+	echo -e $(colorize 'yellow' 'Git status for each worktree:')
+	# Loop through each worktree and get the git status
+	for worktree in "$worktrees_path"/*; do
+		if [ -d "$worktree" ]; then
+			git -C "$worktree" status
+			echo ""
+		fi
+	done
+}
+
+export -f status

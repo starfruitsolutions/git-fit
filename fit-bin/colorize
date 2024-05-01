@@ -1,0 +1,23 @@
+#!/bin/bash
+
+#Define color codes using an associative array
+declare -A colors
+colors[red]='\033[0;31m'
+colors[green]='\033[0;32m'
+colors[yellow]='\033[1;33m'
+colors[blue]='\033[0;34m'
+colors[magenta]='\033[0;35m'
+colors[cyan]='\033[0;36m'
+colors[none]='\033[0m' # No Color
+
+
+# Function to apply color to strings and return the formatted string
+colorize() {
+	local color=$1
+	local text=$2
+	# Check if the specified color exists, default to 'none' if it doesn't
+	[[ -z ${colors[$color]} ]] && color='none'
+	echo -n "${colors[$color]}${text}${colors[none]}"
+}
+
+export -f colorize

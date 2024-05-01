@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# Function to commit changes and automatically merge them into the main repository
+commit() {
+	cd_root
+	if [ $# -ne 2 ]; then
+		echo -e $(colorize 'red' "Error: Incorrect number of arguments.")
+		echo "Usage: fit commit [branch] \"[message]\""
+		exit 1
+	fi
+
+	local branch_name=$1
+	local commit_message=$2
+	local worktree_path="$worktrees_path/$branch_name"
+
+	if [ ! -d "$worktree_path" ]; then
+		echo -e $(colorize 'red' "Error: No worktree found for branch '$branch_name'.")
+		exit 1
+	fi
+
+	# Committing changes in the worktree
+	if git -C "$worktree_path" diff --staged --quiet; then
+		echo "No changes to commit in branch '$branch_name'."
+		return 1  # Exit the function with an error status if no changes
+	else
+		git -C "$worktree_path" commit -m "$commit_message"
+		echo "Changes committed to branch '$branch_name' with message: $commit_message"
+	fi
+
+	# Now handle merging automatically
+	echo "Attempting to merge changes from '$branch_name' into main branch..."
+	# # Fetch latest changes and checkout the main branch
+	# git -C "$repo_path" fetch
+	# git -C "$repo_path" checkout main  # Ensure you're on the correct branch to merge into
+	# Merge changes from the branch
+	if git -C "$repo_path" merge "$branch_name" --no-ff --no-edit; then
+		echo "Changes from '$branch_name' successfully merged into main."
+	else
+		echo "Merge conflict occurred. Attempting automatic conflict resolution..."
+		if git -C "$repo_path" merge --abort; then
+			echo -e $(colorize 'red' "Merge aborted. Please resolve conflicts manually.")
+			return 1  # Exit the function with an error status
+		fi
+	fi
+}
+
+export -f commit

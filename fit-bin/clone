@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Function to handle cloning the repository
+clone() {
+	if [ $# -ne 2 ]; then
+		echo "Error: Incorrect number of arguments."
+		echo "Usage: fit clone [repository] [workingFolderName]"
+		exit 1
+	fi
+
+	local repository=$1
+	local working_folder_name=$2
+
+	# Create the main working folder and .fit subfolders
+	mkdir -p "$working_folder_name/.fit/worktrees"
+	echo "Created working folder and .fit directory: $working_folder_name"
+
+	# Clone the repository into the .fit folder
+	git clone "$repository" "$working_folder_name/.fit/repo"
+	echo "Repository cloned into $working_folder_name/.fit/repo"
+
+	# Copy the repository files to the working folder (excluding the .git directory)
+	rsync -av --exclude='.git' "$working_folder_name/.fit/repo/" "$working_folder_name/"
+	echo "Repository files copied to the working folder."
+}
+
+export -f clone

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# this script is used to install fit
+# it will install fit to /usr/local/bin/fit
+# and install bin to /usr/local/bin/fit-bin
+# and todo: install fit-completion.bash to /etc/bash_completion.d/fit-completion.bash
+
+# move fit to /usr/local/bin
+chmod +x fit
+chmod +x fit-bin/*
+cp fit ~/bin/fit
+cp -r fit-bin ~/bin/

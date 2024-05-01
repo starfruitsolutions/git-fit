@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# Function to list all worktrees
+list() {
+	cd_root
+
+	echo -e $(colorize 'yellow' 'Worktrees:')
+	for worktree in "$worktrees_path"/*; do
+		if [ -d "$worktree" ]; then
+			echo -e "$(colorize 'cyan' "\t$(basename $worktree)")"
+		fi
+	done
+}
+
+export -f list

@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Function to initialize a new Git repository in .fit/repo and copy current directory's content
+init() {
+	if [ $# -eq 1 ]; then
+		mkdir -p $1
+		cd $1
+	fi
+
+	# Check if the repo directory is empty
+	if [ -d ".fit" ]; then
+		echo "This is already a fit repository. Exiting..."
+		return 1  # Exit if the repository directory is not empty
+	fi
+
+	# Create the .fit and repo directories if they do not exist
+	mkdir -p "$repo_path"
+	# create the worktrees directory
+	mkdir -p "$worktrees_path"
+
+	# Copy the current directory content into .fit/repo, excluding the .fit directory itself
+	rsync -av --exclude='.fit' "." "$repo_path/"
+
+	# Initialize Git repository in .fit/repo
+	git -C "$repo_path" init
+	echo "Initialized new Git repository in $repo_path."
+
+	# commit if there's something to commit
+	git -C "$repo_path" add .
+	git -C "$repo_path" commit -m "Initial commit"
+	echo "Initial commit made in $repo_path."
+}
+
+export -f init
